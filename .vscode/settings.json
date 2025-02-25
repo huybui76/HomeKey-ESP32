@@ -81,15 +81,19 @@
     "valarray": "cpp"
   },
   "idf.flashType": "UART",
-  "idf.port": "/dev/ttyACM0",
-  "idf.openOcdConfigs": [
-    "board/esp32s3-builtin.cfg"
-  ],
+  "idf.port": "/dev/tty.usbmodem21201",
+  "idf.openOcdConfigs": ["board/esp32c3-builtin.cfg"],
   "clangd.path": "${userHome}/esp-clang/bin/clangd",
   "clangd.arguments": [
     "--query-driver=${userHome}/.espressif/tools/xtensa-esp-elf/**/xtensa-esp-elf/bin/xtensa-*-elf-*,${userHome}/tools/riscv32-esp-elf/**/riscv32-esp-elf/bin/riscv32-esp-elf-*",
     "--background-index",
     "--import-insertions",
     "--all-scopes-completion"
-  ]
+  ],
+  "idf.espIdfPath": "/Users/huy/esp/v5.3.2/esp-idf",
+  "idf.toolsPath": "/Users/huy/.espressif",
+  "idf.pythonInstallPath": "/opt/homebrew/bin/python3",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c3"
+  }
 }

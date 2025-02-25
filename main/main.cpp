@@ -381,89 +381,59 @@ void alt_action_task(void* arg) {
       if(espConfig::miscConfig.hkAltActionInitLedPin != 255) {
         digitalWrite(espConfig::miscConfig.hkAltActionInitLedPin, HIGH);
       }
-      vTaskDelay(espConfig::miscConfig.hkAltActionInitTimeout / portTICK_PERIOD_MS);
+      //vTaskDelay(espConfig::miscConfig.hkAltActionInitTimeout / portTICK_PERIOD_MS);
       if (espConfig::miscConfig.hkAltActionInitLedPin != 255) {
         digitalWrite(espConfig::miscConfig.hkAltActionInitLedPin, LOW);
       }
       LOG(D, "TIMEOUT");
       hkAltActionActive = false;
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
 }
 
 void gpio_task(void* arg) {
   gpioLockAction status;
-  while (1) {
-    if (gpio_lock_handle != nullptr) {
-      status = {};
-      if (uxQueueMessagesWaiting(gpio_lock_handle) > 0) {
-        xQueueReceive(gpio_lock_handle, &status, 0);
-        LOG(D, "Got something in queue - source = %d action = %d", status.source, status.action);
-        if (status.action == 0) {
-          LOG(D, "%d - %d - %d -%d", espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionMomentaryEnabled, espConfig::miscConfig.lockAlwaysUnlock, espConfig::miscConfig.lockAlwaysLock);
-          if (espConfig::miscConfig.lockAlwaysUnlock && status.source != gpioLockAction::HOMEKIT) {
-            lockTargetState->setVal(lockStates::UNLOCKED);
-            if(espConfig::miscConfig.gpioActionPin != 255){
-              digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
-            }
-            lockCurrentState->setVal(lockStates::UNLOCKED);
-            if (client != nullptr) {
-              esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 1, 0, false);
-            } else LOG(W, "MQTT Client not initialized, cannot publish message");
+  while (true) {
+    if (gpio_lock_handle == nullptr) {
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+      continue;
+    }
 
-            if (static_cast<uint8_t>(espConfig::miscConfig.gpioActionMomentaryEnabled) & status.source) {
-              delay(espConfig::miscConfig.gpioActionMomentaryTimeout);
-              lockTargetState->setVal(lockStates::LOCKED);
-              if(espConfig::miscConfig.gpioActionPin != 255){
-                digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
-              }
-              lockCurrentState->setVal(lockStates::LOCKED);
-              if (client != nullptr) {
-                esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 1, 0, false);
-              } else LOG(W, "MQTT Client not initialized, cannot publish message");
-            }
-          } else if (espConfig::miscConfig.lockAlwaysLock && status.source != gpioLockAction::HOMEKIT) {
-            lockTargetState->setVal(lockStates::LOCKED);
-            if(espConfig::miscConfig.gpioActionPin != 255){
-              digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
-            }
-            lockCurrentState->setVal(lockStates::LOCKED);
-            if (client != nullptr) {
-              esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 1, 0, false);
-            } else LOG(W, "MQTT Client not initialized, cannot publish message");
-          } else {
-            int currentState = lockCurrentState->getVal();
-            if (status.source != gpioLockAction::HOMEKIT) {
-              lockTargetState->setVal(!currentState);
-            }
-            if(espConfig::miscConfig.gpioActionPin != 255){
-              digitalWrite(espConfig::miscConfig.gpioActionPin, currentState == lockStates::UNLOCKED ? espConfig::miscConfig.gpioActionLockState : espConfig::miscConfig.gpioActionUnlockState);
-            }
-            lockCurrentState->setVal(!currentState);
-            if (client != nullptr) {
-              esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getNewVal()).c_str(), 1, 0, false);
-            } else LOG(W, "MQTT Client not initialized, cannot publish message");
-            if ((static_cast<uint8_t>(espConfig::miscConfig.gpioActionMomentaryEnabled) & status.source) && currentState == lockStates::LOCKED) {
-              delay(espConfig::miscConfig.gpioActionMomentaryTimeout);
-              lockTargetState->setVal(currentState);
-              if(espConfig::miscConfig.gpioActionPin != 255){
-                digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
-              }
-              lockCurrentState->setVal(currentState);
-              if (client != nullptr) {
-                esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getNewVal()).c_str(), 1, 0, false);
-              } else LOG(W, "MQTT Client not initialized, cannot publish message");
-            }
-          }
-        } else if (status.action == 2) {
-          vTaskDelete(NULL);
-          return;
+    if (xQueueReceive(gpio_lock_handle, &status, 0) != pdTRUE) {
+      vTaskDelay(5 / portTICK_PERIOD_MS);
+      continue;
+    }
+
+    if (status.action == 0) {
+      if (espConfig::miscConfig.lockAlwaysUnlock && status.source != gpioLockAction::HOMEKIT) {
+        lockTargetState->setVal(lockStates::UNLOCKED);
+        digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
+        lockCurrentState->setVal(lockStates::UNLOCKED);
+        if (client != nullptr) {
+          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 1, 0, false);
+        }
+      } else if (espConfig::miscConfig.lockAlwaysLock && status.source != gpioLockAction::HOMEKIT) {
+        lockTargetState->setVal(lockStates::LOCKED);
+        digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
+        lockCurrentState->setVal(lockStates::LOCKED);
+        if (client != nullptr) {
+          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 1, 0, false);
+        }
+      } else {
+        int currentState = lockCurrentState->getVal();
+        lockTargetState->setVal(!currentState);
+        digitalWrite(espConfig::miscConfig.gpioActionPin, currentState == lockStates::UNLOCKED ? espConfig::miscConfig.gpioActionLockState : espConfig::miscConfig.gpioActionUnlockState);
+        lockCurrentState->setVal(!currentState);
+        if (client != nullptr) {
+          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getNewVal()).c_str(), 1, 0, false);
         }
       }
+    } else if (status.action == 2) {
+      vTaskDelete(NULL);
+      return;
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 }
 
@@ -480,7 +450,7 @@ void neopixel_task(void* arg) {
           if (espConfig::miscConfig.nfcNeopixelPin && espConfig::miscConfig.nfcNeopixelPin != 255) {
             LOG(D, "SUCCESS PIXEL %d:%d,%d,%d", espConfig::miscConfig.nfcNeopixelPin, espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::R], espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::G], espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::B]);
             pixel->set(pixel->RGB(espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::R], espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::G], espConfig::miscConfig.neopixelFailureColor[espConfig::misc_config_t::colorMap::B]));
-            delay(espConfig::miscConfig.neopixelFailTime);
+            //delay(espConfig::miscConfig.neopixelFailTime);
             pixel->off();
           }
           break;
@@ -488,7 +458,7 @@ void neopixel_task(void* arg) {
           if (espConfig::miscConfig.nfcNeopixelPin && espConfig::miscConfig.nfcNeopixelPin != 255) {
             LOG(D, "FAIL PIXEL %d:%d,%d,%d", espConfig::miscConfig.nfcNeopixelPin, espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::R], espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::G], espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::B]);
             pixel->set(pixel->RGB(espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::R], espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::G], espConfig::miscConfig.neopixelSuccessColor[espConfig::misc_config_t::colorMap::B]));
-            delay(espConfig::miscConfig.neopixelSuccessTime);
+            //delay(espConfig::miscConfig.neopixelSuccessTime);
             pixel->off();
           }
           break;
@@ -499,7 +469,7 @@ void neopixel_task(void* arg) {
         }
       }
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(5/ portTICK_PERIOD_MS);
   }
 }
 void nfc_gpio_task(void* arg) {
@@ -515,7 +485,7 @@ void nfc_gpio_task(void* arg) {
           if (espConfig::miscConfig.nfcFailPin && espConfig::miscConfig.nfcFailPin != 255) {
             LOG(D, "FAIL LED %d:%d", espConfig::miscConfig.nfcFailPin, espConfig::miscConfig.nfcFailHL);
             digitalWrite(espConfig::miscConfig.nfcFailPin, espConfig::miscConfig.nfcFailHL);
-            delay(espConfig::miscConfig.nfcFailTime);
+            //delay(espConfig::miscConfig.nfcFailTime);
             digitalWrite(espConfig::miscConfig.nfcFailPin, !espConfig::miscConfig.nfcFailHL);
           }
           break;
@@ -523,14 +493,14 @@ void nfc_gpio_task(void* arg) {
           if (espConfig::miscConfig.nfcSuccessPin && espConfig::miscConfig.nfcSuccessPin != 255) {
             LOG(D, "SUCCESS LED %d:%d", espConfig::miscConfig.nfcSuccessPin, espConfig::miscConfig.nfcSuccessHL);
             digitalWrite(espConfig::miscConfig.nfcSuccessPin, espConfig::miscConfig.nfcSuccessHL);
-            delay(espConfig::miscConfig.nfcSuccessTime);
+           // delay(espConfig::miscConfig.nfcSuccessTime);
             digitalWrite(espConfig::miscConfig.nfcSuccessPin, !espConfig::miscConfig.nfcSuccessHL);
           }
           break;
         case 2:
           if(hkAltActionActive){
             digitalWrite(espConfig::miscConfig.hkAltActionPin, espConfig::miscConfig.hkAltActionGpioState);
-            delay(espConfig::miscConfig.hkAltActionTimeout);
+            //delay(espConfig::miscConfig.hkAltActionTimeout);
             digitalWrite(espConfig::miscConfig.hkAltActionPin, !espConfig::miscConfig.hkAltActionGpioState);
           }
           break;
@@ -542,9 +512,9 @@ void nfc_gpio_task(void* arg) {
         }
       }
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
   }
-}
+};
 
 struct LockMechanism : Service::LockMechanism
 {
@@ -552,49 +522,40 @@ struct LockMechanism : Service::LockMechanism
 
   LockMechanism() : Service::LockMechanism() {
     LOG(I, "Configuring LockMechanism"); // initialization message
-    lockCurrentState = new Characteristic::LockCurrentState(1, true);
-    lockTargetState = new Characteristic::LockTargetState(1, true);
-    memcpy(ecpData + 8, readerData.reader_gid.data(), readerData.reader_gid.size());
-    with_crc16(ecpData, 16, ecpData + 16);
+    lockCurrentState = new Characteristic::LockCurrentState(lockStates::LOCKED, true);
+    lockTargetState = new Characteristic::LockTargetState(lockStates::LOCKED, true);
+
+    // Đảm bảo luôn đặt trạng thái LOCK khi khởi động
+    lockCurrentState->setVal(lockStates::LOCKED);
+    lockTargetState->setVal(lockStates::LOCKED);
+    
     if (espConfig::miscConfig.gpioActionPin != 255) {
-      if (lockCurrentState->getVal() == lockStates::LOCKED) {
         digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
-      } else if (lockCurrentState->getVal() == lockStates::UNLOCKED) {
-        digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
-      }
     }
-  } // end constructor
+}
 
-  boolean update() {
-    int targetState = lockTargetState->getNewVal();
-    LOG(I, "New LockState=%d, Current LockState=%d", targetState, lockCurrentState->getVal());
-    if (espConfig::miscConfig.gpioActionPin != 255) {
-      const gpioLockAction gpioAction{ .source = gpioLockAction::HOMEKIT, .action = 0 };
-      xQueueSend(gpio_lock_handle, &gpioAction, 0);
-    } else if (espConfig::miscConfig.hkDumbSwitchMode) {
-      const gpioLockAction gpioAction{ .source = gpioLockAction::HOMEKIT, .action = 0 };
-      xQueueSend(gpio_lock_handle, &gpioAction, 0);
-    }
-    int currentState = lockCurrentState->getNewVal();
-    if (client != nullptr) {
-      if (espConfig::miscConfig.gpioActionPin == 255) {
-        if (targetState != currentState) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), targetState == lockStates::UNLOCKED ? std::to_string(lockStates::UNLOCKING).c_str() : std::to_string(lockStates::LOCKING).c_str(), 1, 1, true);
-        } else {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(currentState).c_str(), 1, 1, true);
-        }
-      }
-      if (espConfig::mqttData.lockEnableCustomState) {
-        if (targetState == lockStates::UNLOCKED) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["UNLOCK"]).c_str(), 0, 0, false);
-        } else if (targetState == lockStates::LOCKED) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["LOCK"]).c_str(), 0, 0, false);
-        }
-      }
-    } else LOG(W, "MQTT Client not initialized, cannot publish message");
 
-    return (true);
+boolean update() {
+  int targetState = lockTargetState->getNewVal();
+  LOG(I, "New LockState=%d, Current LockState=%d", targetState, lockCurrentState->getVal());
+
+  if (targetState == lockStates::UNLOCKED) {
+      // Cập nhật trạng thái mở khóa
+      lockCurrentState->setVal(lockStates::UNLOCKED);
+      if (espConfig::miscConfig.gpioActionPin != 255) {
+          digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
+      }
+  } else if (targetState == lockStates::LOCKED) {
+      // Cập nhật trạng thái khóa
+      lockCurrentState->setVal(lockStates::LOCKED);
+      if (espConfig::miscConfig.gpioActionPin != 255) {
+          digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
+      }
   }
+
+  return true;
+}
+
 };
 
 struct NFCAccess : Service::NFCAccess
@@ -1308,7 +1269,8 @@ void setupWeb() {
             LOG(D, "ENABLING HomeKit Trigger - Simple GPIO");
             pinMode(it.value(), OUTPUT);
             if(gpio_lock_task_handle == nullptr){
-              xTaskCreate(gpio_task, "gpio_task", 4096, NULL, 2, &gpio_lock_task_handle);
+              xTaskCreate(gpio_task, "gpio_task", 4096, NULL, configMAX_PRIORITIES - 1, &gpio_lock_task_handle);
+
             }
             if(espConfig::miscConfig.hkDumbSwitchMode){
               serializedData->at("hkDumbSwitchMode") = false;
@@ -1323,7 +1285,8 @@ void setupWeb() {
             gpio_reset_pin(gpio_num_t(espConfig::miscConfig.gpioActionPin));
           }
         } else if (it.key() == std::string("hkDumbSwitchMode") && gpio_lock_task_handle == nullptr) {
-          xTaskCreate(gpio_task, "gpio_task", 4096, NULL, 2, &gpio_lock_task_handle);
+          xTaskCreate(gpio_task, "gpio_task", 4096, NULL, configMAX_PRIORITIES - 1, &gpio_lock_task_handle);
+
         }
         configData.at(it.key()) = it.value();
       }
@@ -1573,25 +1536,7 @@ void nfc_thread_entry(void* arg) {
           payload["homekey"] = true;
           std::string payloadStr = payload.dump();
           mqtt_publish(espConfig::mqttData.hkTopic, payloadStr, 0, false);
-          if (espConfig::miscConfig.lockAlwaysUnlock) {
-            if (espConfig::miscConfig.gpioActionPin == 255 || !espConfig::miscConfig.hkGpioControlledState) {
-              lockCurrentState->setVal(lockStates::UNLOCKED);
-              lockTargetState->setVal(lockStates::UNLOCKED);
-              mqtt_publish(espConfig::mqttData.lockStateTopic, std::to_string(lockStates::UNLOCKED), 1, true);
-            }
-            if (espConfig::mqttData.lockEnableCustomState) {
-              mqtt_publish(espConfig::mqttData.lockCustomStateTopic, std::to_string(espConfig::mqttData.customLockActions["UNLOCK"]), 0, false);
-            }
-          } else if (espConfig::miscConfig.lockAlwaysLock) {
-            if (espConfig::miscConfig.gpioActionPin == 255 || espConfig::miscConfig.hkGpioControlledState) {
-              lockCurrentState->setVal(lockStates::LOCKED);
-              lockTargetState->setVal(lockStates::LOCKED);
-              mqtt_publish(espConfig::mqttData.lockStateTopic, std::to_string(lockStates::LOCKED), 1, true);
-            }
-            if (espConfig::mqttData.lockEnableCustomState) {
-              mqtt_publish(espConfig::mqttData.lockCustomStateTopic, std::to_string(espConfig::mqttData.customLockActions["LOCK"]), 0, false);
-            }
-          } else {
+          
             int currentState = lockCurrentState->getVal();
             if (espConfig::mqttData.lockEnableCustomState) {
               if (currentState == lockStates::UNLOCKED) {
@@ -1600,7 +1545,7 @@ void nfc_thread_entry(void* arg) {
                 mqtt_publish(espConfig::mqttData.lockCustomStateTopic, std::to_string(espConfig::mqttData.customLockActions["UNLOCK"]), 0, false);
               }
             }
-          }
+          
 
           auto stopTime = std::chrono::high_resolution_clock::now();
           LOG(I, "Total Time (detection->auth->gpio->mqtt): %lli ms", std::chrono::duration_cast<std::chrono::milliseconds>(stopTime - startTime).count());
@@ -1691,6 +1636,13 @@ void setup() {
   size_t len;
   const char* TAG = "SETUP";
   nvs_open("SAVED_DATA", NVS_READWRITE, &savedData);
+  if (lockCurrentState != nullptr && lockTargetState != nullptr) {
+    lockCurrentState->setVal(lockStates::LOCKED);
+    lockTargetState->setVal(lockStates::LOCKED);
+    if (espConfig::miscConfig.gpioActionPin != 255) {
+        digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
+    }
+}
   if (!nvs_get_blob(savedData, "READERDATA", NULL, &len)) {
     std::vector<uint8_t> savedBuf(len);
     nvs_get_blob(savedData, "READERDATA", savedBuf.data(), &len);
@@ -1878,7 +1830,8 @@ void setup() {
     xTaskCreate(nfc_gpio_task, "nfc_gpio_task", 4096, NULL, 2, &gpio_led_task_handle);
   }
   if (espConfig::miscConfig.gpioActionPin != 255 || espConfig::miscConfig.hkDumbSwitchMode) {
-    xTaskCreate(gpio_task, "gpio_task", 4096, NULL, 2, &gpio_lock_task_handle);
+    xTaskCreate(gpio_task, "gpio_task", 4096, NULL, configMAX_PRIORITIES - 1, &gpio_lock_task_handle);
+
   }
   if (espConfig::miscConfig.hkAltActionInitPin != 255) {
     xTaskCreate(alt_action_task, "alt_action_task", 2048, NULL, 2, &alt_action_task_handle);
