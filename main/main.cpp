@@ -22,8 +22,13 @@
 #include "NFC_SERV_CHARS.h"
 #include <mbedtls/sha256.h>
 #include <esp_mac.h>
+#include <WiFi.h>  // Đảm bảo bạn có thư viện WiFi
+#include "esp_wifi.h"
 
 const char* TAG = "MAIN";
+
+bool wifiEnabled = true;
+const gpio_num_t wifiButtonPin = GPIO_NUM_0;
 
 AsyncWebServer webServer(80);
 PN532_SPI *pn532spi;
@@ -38,6 +43,38 @@ TaskHandle_t alt_action_task_handle = nullptr;
 TaskHandle_t nfc_reconnect_task = nullptr;
 TaskHandle_t nfc_poll_task = nullptr;
 
+
+void disableWiFi() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  esp_wifi_stop();
+  wifiEnabled = false;
+  Serial.println("WiFi OFF");
+}
+
+void enableWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.begin();  // Tự động kết nối lại WiFi đã lưu trong flash
+  wifiEnabled = true;
+  Serial.println("WiFi ON");
+}
+
+void wifi_button_task(void* arg) {
+  pinMode(wifiButtonPin, INPUT_PULLUP);
+  bool lastState = HIGH;
+
+  while (true) {
+    bool currentState = digitalRead(wifiButtonPin);
+    if (lastState == HIGH && currentState == LOW) {
+      // Nút được nhấn
+      if (!wifiEnabled) {
+        enableWiFi();
+      }
+    }
+    lastState = currentState;
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+  }
+}
 nvs_handle savedData;
 readerData_t readerData;
 uint8_t ecpData[18] = { 0x6A, 0x2, 0xCB, 0x2, 0x6, 0x2, 0x11, 0x0 };
@@ -412,14 +449,14 @@ void gpio_task(void* arg) {
         digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
         lockCurrentState->setVal(lockStates::UNLOCKED);
         if (client != nullptr) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 1, 0, false);
+          //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 1, 0, false);
         }
       } else if (espConfig::miscConfig.lockAlwaysLock && status.source != gpioLockAction::HOMEKIT) {
         lockTargetState->setVal(lockStates::LOCKED);
         digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
         lockCurrentState->setVal(lockStates::LOCKED);
         if (client != nullptr) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 1, 0, false);
+          //(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 1, 0, false);
         }
       } else {
         int currentState = lockCurrentState->getVal();
@@ -427,7 +464,7 @@ void gpio_task(void* arg) {
         digitalWrite(espConfig::miscConfig.gpioActionPin, currentState == lockStates::UNLOCKED ? espConfig::miscConfig.gpioActionLockState : espConfig::miscConfig.gpioActionUnlockState);
         lockCurrentState->setVal(!currentState);
         if (client != nullptr) {
-          esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getNewVal()).c_str(), 1, 0, false);
+          //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getNewVal()).c_str(), 1, 0, false);
         }
       }
     } else if (status.action == 2) {
@@ -593,6 +630,7 @@ struct NFCAccess : Service::NFCAccess
     if (readerData.reader_gid.size() > 0) {
       memcpy(ecpData + 8, readerData.reader_gid.data(), readerData.reader_gid.size());
       with_crc16(ecpData, 16, ecpData + 16);
+      disableWiFi();
     }
     TLV8 res(NULL, 0);
     res.unpack(result.data(), result.size());
@@ -740,33 +778,33 @@ void print_issuers(const char* buf) {
 void set_custom_state_handler(esp_mqtt_client_handle_t client, int state) {
   if (espConfig::mqttData.customLockStates["C_UNLOCKING"] == state) {
     lockTargetState->setVal(lockStates::UNLOCKED);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKING).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKING).c_str(), 0, 1, true);
     return;
   } else if (espConfig::mqttData.customLockStates["C_LOCKING"] == state) {
     lockTargetState->setVal(lockStates::LOCKED);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKING).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKING).c_str(), 0, 1, true);
     return;
   } else if (espConfig::mqttData.customLockStates["C_UNLOCKED"] == state) {
     if (espConfig::miscConfig.gpioActionPin != 255) {
       digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionUnlockState);
     }
     lockCurrentState->setVal(lockStates::UNLOCKED);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 0, 1, true);
     return;
   } else if (espConfig::mqttData.customLockStates["C_LOCKED"] == state) {
     if (espConfig::miscConfig.gpioActionPin != 255) {
       digitalWrite(espConfig::miscConfig.gpioActionPin, espConfig::miscConfig.gpioActionLockState);
     }
     lockCurrentState->setVal(lockStates::LOCKED);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 0, 1, true);
     return;
   } else if (espConfig::mqttData.customLockStates["C_JAMMED"] == state) {
     lockCurrentState->setVal(lockStates::JAMMED);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::JAMMED).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::JAMMED).c_str(), 0, 1, true);
     return;
   } else if (espConfig::mqttData.customLockStates["C_UNKNOWN"] == state) {
     lockCurrentState->setVal(lockStates::UNKNOWN);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNKNOWN).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNKNOWN).c_str(), 0, 1, true);
     return;
   }
   LOG(D, "Update state failed! Recv value not valid");
@@ -780,9 +818,9 @@ void set_state_handler(esp_mqtt_client_handle_t client, int state) {
     }
     lockTargetState->setVal(state);
     lockCurrentState->setVal(state);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::UNLOCKED).c_str(), 0, 1, true);
     if (espConfig::mqttData.lockEnableCustomState) {
-      esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["UNLOCK"]).c_str(), 0, 0, false);
+      //esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["UNLOCK"]).c_str(), 0, 0, false);
     }
     break;
   case lockStates::LOCKED:
@@ -791,15 +829,15 @@ void set_state_handler(esp_mqtt_client_handle_t client, int state) {
     }
     lockTargetState->setVal(state);
     lockCurrentState->setVal(state);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockStates::LOCKED).c_str(), 0, 1, true);
     if (espConfig::mqttData.lockEnableCustomState) {
-      esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["LOCK"]).c_str(), 0, 0, false);
+      //esp_mqtt_client_publish(client, espConfig::mqttData.lockCustomStateTopic.c_str(), std::to_string(espConfig::mqttData.customLockActions["LOCK"]).c_str(), 0, 0, false);
     }
     break;
   case lockStates::JAMMED:
   case lockStates::UNKNOWN:
     lockCurrentState->setVal(state);
-    esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(state).c_str(), 0, 1, true);
+    //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(state).c_str(), 0, 1, true);
     break;
   default:
     LOG(D, "Update state failed! Recv value not valid");
@@ -905,12 +943,12 @@ void mqtt_data_handler(void* event_handler_arg, esp_event_base_t event_base, int
   } else if (!strcmp(espConfig::mqttData.lockTStateCmd.c_str(), topic.c_str())) {
     if (state == lockStates::UNLOCKED || state == lockStates::LOCKED) {
       lockTargetState->setVal(state);
-      esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), state == lockStates::UNLOCKED ? std::to_string(lockStates::UNLOCKING).c_str() : std::to_string(lockStates::LOCKING).c_str(), 0, 1, true);
+      //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), state == lockStates::UNLOCKED ? std::to_string(lockStates::UNLOCKING).c_str() : std::to_string(lockStates::LOCKING).c_str(), 0, 1, true);
     }
   } else if (!strcmp(espConfig::mqttData.lockCStateCmd.c_str(), topic.c_str())) {
     if (state == lockStates::UNLOCKED || state == lockStates::LOCKED || state == lockStates::JAMMED || state == lockStates::UNKNOWN) {
       lockCurrentState->setVal(state);
-      esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getVal()).c_str(), 0, 1, true);
+      //esp_mqtt_client_publish(client, espConfig::mqttData.lockStateTopic.c_str(), std::to_string(lockCurrentState->getVal()).c_str(), 0, 1, true);
     }
   } else if (!strcmp(espConfig::mqttData.btrLvlCmdTopic.c_str(), topic.c_str())) {
     btrLevel->setVal(state);
@@ -926,24 +964,24 @@ void mqtt_data_handler(void* event_handler_arg, esp_event_base_t event_base, int
  * The function `mqtt_app_start` initializes and starts an MQTT client with specified configuration
  * parameters.
  */
-static void mqtt_app_start(void) {
-  esp_mqtt_client_config_t mqtt_cfg {};
-  mqtt_cfg.broker.address.hostname = espConfig::mqttData.mqttBroker.c_str();
-  mqtt_cfg.broker.address.port = espConfig::mqttData.mqttPort;
-  mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
-  mqtt_cfg.credentials.client_id = espConfig::mqttData.mqttClientId.c_str();
-  mqtt_cfg.credentials.username = espConfig::mqttData.mqttUsername.c_str();
-  mqtt_cfg.credentials.authentication.password = espConfig::mqttData.mqttPassword.c_str();
-  mqtt_cfg.session.last_will.topic = espConfig::mqttData.lwtTopic.c_str();
-  mqtt_cfg.session.last_will.msg = "offline";
-  mqtt_cfg.session.last_will.msg_len = 7;
-  mqtt_cfg.session.last_will.retain = true;
-  mqtt_cfg.session.last_will.qos = 1;
-  client = esp_mqtt_client_init(&mqtt_cfg);
-  esp_mqtt_client_register_event(client, MQTT_EVENT_CONNECTED, mqtt_connected_event, client);
-  esp_mqtt_client_register_event(client, MQTT_EVENT_DATA, mqtt_data_handler, client);
-  esp_mqtt_client_start(client);
-}
+// static void mqtt_app_start(void) {
+//   esp_mqtt_client_config_t mqtt_cfg {};
+//   mqtt_cfg.broker.address.hostname = espConfig::mqttData.mqttBroker.c_str();
+//   mqtt_cfg.broker.address.port = espConfig::mqttData.mqttPort;
+//   mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+//   mqtt_cfg.credentials.client_id = espConfig::mqttData.mqttClientId.c_str();
+//   mqtt_cfg.credentials.username = espConfig::mqttData.mqttUsername.c_str();
+//   mqtt_cfg.credentials.authentication.password = espConfig::mqttData.mqttPassword.c_str();
+//   mqtt_cfg.session.last_will.topic = espConfig::mqttData.lwtTopic.c_str();
+//   mqtt_cfg.session.last_will.msg = "offline";
+//   mqtt_cfg.session.last_will.msg_len = 7;
+//   mqtt_cfg.session.last_will.retain = true;
+//   mqtt_cfg.session.last_will.qos = 1;
+//   client = esp_mqtt_client_init(&mqtt_cfg);
+//   esp_mqtt_client_register_event(client, MQTT_EVENT_CONNECTED, mqtt_connected_event, client);
+//   esp_mqtt_client_register_event(client, MQTT_EVENT_DATA, mqtt_data_handler, client);
+//   esp_mqtt_client_start(client);
+// }
 
 void notFound(AsyncWebServerRequest* request) {
   request->send(404, "text/plain", "Not found");
@@ -1405,7 +1443,7 @@ void mqttConfigReset(const char* buf) {
 void wifiCallback(int status) {
   if (status == 1) {
     if (espConfig::mqttData.mqttBroker.size() >= 7 && espConfig::mqttData.mqttBroker.size() <= 16 && !std::equal(espConfig::mqttData.mqttBroker.begin(), espConfig::mqttData.mqttBroker.end(), "0.0.0.0")) {
-      mqtt_app_start();
+      //mqtt_app_start();
     }
     setupWeb();
   }

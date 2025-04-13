@@ -80,8 +80,8 @@
     "typeinfo": "cpp",
     "valarray": "cpp"
   },
-  "idf.flashType": "UART",
-  "idf.port": "/dev/tty.usbmodem21201",
+  "idf.flashType": "JTAG",
+  "idf.port": "/dev/tty.usbmodem101",
   "idf.openOcdConfigs": ["board/esp32c3-builtin.cfg"],
   "clangd.path": "${userHome}/esp-clang/bin/clangd",
   "clangd.arguments": [
